@@ -35,6 +35,7 @@ import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.Task;
 
 import java.util.HashMap;
+import java.util.Map;
 
 import io.flutter.plugin.common.EventChannel;
 import io.flutter.plugin.common.EventChannel.EventSink;
@@ -44,35 +45,35 @@ import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.PluginRegistry.Registrar;
+import io.flutter.plugin.common.PluginRegistry.RequestPermissionsResultListener;
 
 /**
  * LocationPlugin
  */
-public class LocationPlugin implements MethodCallHandler, StreamHandler {
+public class LocationPlugin implements MethodCallHandler, StreamHandler, RequestPermissionsResultListener {
     private static final String STREAM_CHANNEL_NAME = "lyokone/locationstream";
     private static final String METHOD_CHANNEL_NAME = "lyokone/location";
 
     private static final int REQUEST_PERMISSIONS_REQUEST_CODE = 34;
     private static final int REQUEST_CHECK_SETTINGS = 0x1;
     private static final long UPDATE_INTERVAL_IN_MILLISECONDS = 10000;
-    private static final long FASTEST_UPDATE_INTERVAL_IN_MILLISECONDS = UPDATE_INTERVAL_IN_MILLISECONDS / 2;
 
     private FusedLocationProviderClient mFusedLocationClient;
     private SettingsClient mSettingsClient;
-    private LocationRequest mLocationRequest;
-    private LocationSettingsRequest mLocationSettingsRequest;
     private LocationCallback mLocationCallback;
 
     private EventSink events;
     private final Activity activity;
+    private boolean autoGetPermissions;
+    private Result permissionsResult;
+
 
     LocationPlugin(Activity activity) {
         this.activity = activity;
         mFusedLocationClient = LocationServices.getFusedLocationProviderClient(activity);
         mSettingsClient = LocationServices.getSettingsClient(activity);
         createLocationCallback();
-        createLocationRequest();
-        buildLocationSettingsRequest();
+        this.autoGetPermissions = true;
     }
 
     /**
@@ -95,46 +96,6 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler {
     }
 
     /**
-     * Sets up the location request. Android has two location request settings:
-     * {@code ACCESS_COARSE_LOCATION} and {@code ACCESS_FINE_LOCATION}. These settings control
-     * the accuracy of the current location. This sample uses ACCESS_FINE_LOCATION, as defined in
-     * the AndroidManifest.xml.
-     * <p/>
-     * When the ACCESS_FINE_LOCATION setting is specified, combined with a fast update
-     * interval (5 seconds), the Fused Location Provider API returns location updates that are
-     * accurate to within a few feet.
-     * <p/>
-     * These settings are appropriate for mapping applications that show real-time location
-     * updates.
-     */
-    private void createLocationRequest() {
-        mLocationRequest = new LocationRequest();
-
-        // Sets the desired interval for active location updates. This interval is
-        // inexact. You may not receive updates at all if no location sources are available, or
-        // you may receive them slower than requested. You may also receive updates faster than
-        // requested if other applications are requesting location at a faster interval.
-        mLocationRequest.setInterval(UPDATE_INTERVAL_IN_MILLISECONDS);
-
-        // Sets the fastest rate for active location updates. This interval is exact, and your
-        // application will never receive updates faster than this value.
-        mLocationRequest.setFastestInterval(FASTEST_UPDATE_INTERVAL_IN_MILLISECONDS);
-
-        mLocationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
-    }
-
-    /**
-     * Uses a {@link com.google.android.gms.location.LocationSettingsRequest.Builder} to build
-     * a {@link com.google.android.gms.location.LocationSettingsRequest} that is used for checking
-     * if a device has the needed location settings.
-     */
-    private void buildLocationSettingsRequest() {
-        LocationSettingsRequest.Builder builder = new LocationSettingsRequest.Builder();
-        builder.addLocationRequest(mLocationRequest);
-        mLocationSettingsRequest = builder.build();
-    }
-
-    /**
     * Return the current state of the permissions needed.
     */
     private boolean checkPermissions() {
@@ -151,11 +112,14 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler {
      * Plugin registration.
      */
     public static void registerWith(Registrar registrar) {
+        final LocationPlugin instance = new LocationPlugin(registrar.activity());
         final MethodChannel channel = new MethodChannel(registrar.messenger(), METHOD_CHANNEL_NAME);
-        channel.setMethodCallHandler(new LocationPlugin(registrar.activity()));
+        channel.setMethodCallHandler( instance );
 
         final EventChannel eventChannel = new EventChannel(registrar.messenger(), STREAM_CHANNEL_NAME);
-        eventChannel.setStreamHandler(new LocationPlugin(registrar.activity()));
+        eventChannel.setStreamHandler( instance );
+
+        registrar.addRequestPermissionsResultListener( instance );
     }
 
     private void getLastLocation(final Result result) {
@@ -184,65 +148,183 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler {
         });
     }
 
+    private String getAutorizationState() {
+        if(checkPermissions()) {
+            return "Always";
+        }else if( ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.ACCESS_FINE_LOCATION) ) {
+            return "Denied";
+        }else{
+            return "NotDetermined";
+        }
+    }
+
     @Override
     public void onMethodCall(MethodCall call, final Result result) {
         if (call.method.equals("getLocation")) {
             if (!checkPermissions()) {
-                requestPermissions();
+                if( autoGetPermissions ) {
+                    requestPermissions();
+                }
                 return;
             }
             getLastLocation(result);
+        } else if (call.method.equals("getAuthorizationStatus")) {
+            autoGetPermissions = false;
+            Log.i(METHOD_CHANNEL_NAME, "Location state " + getAutorizationState());
+            result.success( getAutorizationState() );
+        } else if (call.method.equals("authorize")) {
+            if (checkPermissions()) {
+                result.success("Always");
+            } else {
+                permissionsResult = result;
+                requestPermissions();
+            }
+        } else if (call.method.equals("wasStartedByLocationManager")) {
+            result.success(0);
+        } else if (call.method.equals("start")) {
+            startListening(call.arguments, result);
+            result.success(1);
+        } else if (call.method.equals("stop")) {
+            stopListening();
+            result.success(1);
+        } else if (call.method.equals("startMonitoringSignificant")) {
+            result.success(1);
+        } else if (call.method.equals("stopMonitoringSignificant")) {
+            result.success(1);
         } else {
             result.notImplemented();
         }
     }
 
-    @Override
-    public void onListen(Object arguments, final EventSink eventsSink) {
-        events = eventsSink;
-        if (!checkPermissions()) {
-            requestPermissions();
+    public void startListening(Object arguments, final Result result) {
+        int accuracy = LocationRequest.PRIORITY_HIGH_ACCURACY;
+        long interval = UPDATE_INTERVAL_IN_MILLISECONDS;
+        boolean start = true;
+
+        if( arguments != null && arguments instanceof Map ) {
+            final Map<?, ?> args = (Map<?, ?>) arguments;
+            final Number ac = (Number) args.get("accuracy");
+            if (ac != null) {
+                accuracy = ac.intValue();
+                if (accuracy < LocationRequest.PRIORITY_HIGH_ACCURACY) {
+                    accuracy = LocationRequest.PRIORITY_HIGH_ACCURACY;
+                }
+                if (accuracy > LocationRequest.PRIORITY_NO_POWER) {
+                    accuracy = LocationRequest.PRIORITY_NO_POWER;
+                }
+            }
+            final Number iv = (Number) args.get("interval");
+            if (iv != null) {
+                interval = iv.intValue();
+                if (interval < 100) {
+                    accuracy = 100;
+                }
+            }
+            final Number st = (Number) args.get("start");
+            if (st != null && st.intValue() == 0) {
+                start = false;
+            }
+        }
+
+        if( !start ) {
+            if( result != null ) {
+                result.success( 1 );
+            }
             return;
         }
-        getLastLocation(null);
+
+        if (!checkPermissions()) {
+            if( autoGetPermissions ) {
+                requestPermissions();
+            }
+            return;
+        }
+
+
+        final LocationRequest locationRequest = new LocationRequest();
+
+
+        // Sets the desired interval for active location updates. This interval is
+        // inexact. You may not receive updates at all if no location sources are available, or
+        // you may receive them slower than requested. You may also receive updates faster than
+        // requested if other applications are requesting location at a faster interval.
+        locationRequest.setInterval( interval );
+
+        // Sets the fastest rate for active location updates. This interval is exact, and your
+        // application will never receive updates faster than this value.
+        locationRequest.setFastestInterval( interval / 2 );
+
+        locationRequest.setPriority( accuracy );
+
+        LocationSettingsRequest.Builder builder = new LocationSettingsRequest.Builder();
+        builder.addLocationRequest(locationRequest);
+
         /**
-        * Requests location updates from the FusedLocationApi. Note: we don't call this unless location
-        * runtime permission has been granted.
-        */
-        mSettingsClient.checkLocationSettings(mLocationSettingsRequest)
+         * Requests location updates from the FusedLocationApi. Note: we don't call this unless location
+         * runtime permission has been granted.
+         */
+        mSettingsClient.checkLocationSettings( builder.build() )
                 .addOnSuccessListener(activity, new OnSuccessListener<LocationSettingsResponse>() {
                     @Override
                     public void onSuccess(LocationSettingsResponse locationSettingsResponse) {
-                        mFusedLocationClient.requestLocationUpdates(mLocationRequest, mLocationCallback,
+                        mFusedLocationClient.requestLocationUpdates(locationRequest, mLocationCallback,
                                 Looper.myLooper());
-                    }
-                }).addOnFailureListener(activity, new OnFailureListener() {
-                    @Override
-                    public void onFailure(@NonNull Exception e) {
-                        int statusCode = ((ApiException) e).getStatusCode();
-                        switch (statusCode) {
-                        case LocationSettingsStatusCodes.RESOLUTION_REQUIRED:
-                            try {
-                                // Show the dialog by calling startResolutionForResult(), and check the
-                                // result in onActivityResult().
-                                ResolvableApiException rae = (ResolvableApiException) e;
-                                rae.startResolutionForResult(activity, REQUEST_CHECK_SETTINGS);
-                            } catch (IntentSender.SendIntentException sie) {
-                                Log.i(METHOD_CHANNEL_NAME, "PendingIntent unable to execute request.");
-                            }
-                            break;
-                        case LocationSettingsStatusCodes.SETTINGS_CHANGE_UNAVAILABLE:
-                            String errorMessage = "Location settings are inadequate, and cannot be "
-                                    + "fixed here. Fix in Settings.";
-                            Log.e(METHOD_CHANNEL_NAME, errorMessage);
+                        if( result != null ) {
+                            result.success( 1 );
                         }
                     }
-                });
+                }).addOnFailureListener(activity, new OnFailureListener() {
+            @Override
+            public void onFailure(@NonNull Exception e) {
+                if( result != null ) {
+                    result.success( 0 );
+                }
+                int statusCode = ((ApiException) e).getStatusCode();
+                switch (statusCode) {
+                    case LocationSettingsStatusCodes.RESOLUTION_REQUIRED:
+                        try {
+                            // Show the dialog by calling startResolutionForResult(), and check the
+                            // result in onActivityResult().
+                            ResolvableApiException rae = (ResolvableApiException) e;
+                            rae.startResolutionForResult(activity, REQUEST_CHECK_SETTINGS);
+                        } catch (IntentSender.SendIntentException sie) {
+                            Log.i(METHOD_CHANNEL_NAME, "PendingIntent unable to execute request.");
+                        }
+                        break;
+                    case LocationSettingsStatusCodes.SETTINGS_CHANGE_UNAVAILABLE:
+                        String errorMessage = "Location settings are inadequate, and cannot be "
+                                + "fixed here. Fix in Settings.";
+                        Log.e(METHOD_CHANNEL_NAME, errorMessage);
+                }
+            }
+        });
+    }
+
+    public void stopListening() {
+        mFusedLocationClient.removeLocationUpdates(mLocationCallback);
+    }
+
+    @Override
+    public void onListen(Object arguments, final EventSink eventsSink) {
+        events = eventsSink;
+        startListening(arguments, null);
     }
 
     @Override
     public void onCancel(Object arguments) {
-        mFusedLocationClient.removeLocationUpdates(mLocationCallback);
+        stopListening();
         events = null;
+    }
+
+    public boolean onRequestPermissionsResult(int requestCode,
+                                       String[] permissions,
+                                       int[] grantResults) {
+
+        if( permissions.length>0 && permissions[0].equals(  Manifest.permission.ACCESS_FINE_LOCATION ) && permissionsResult != null) {
+            permissionsResult.success( grantResults[0] == PackageManager.PERMISSION_GRANTED ? "Always" : "Denied" );
+            permissionsResult = null;
+        }
+
+        return true;
     }
 }
