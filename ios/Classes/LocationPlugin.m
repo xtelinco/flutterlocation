@@ -108,6 +108,7 @@ static bool launchedByLocationManager = false;
         if( [CLLocationManager locationServicesEnabled] ) {
             self.authorizeResult = result;
             [self getSharedLocationManager];
+            NSLog(@"args: %@", call.arguments);
             if([ call.arguments[@"type"] isEqualToString:@"Always"]) {
                 [self.clLocationManager requestAlwaysAuthorization];
             }else{
@@ -118,7 +119,7 @@ static bool launchedByLocationManager = false;
         }
     }else if ([call.method isEqualToString:@"wasStartedByLocationManager"]) {
         if(launchedByLocationManager) {
-            result( [[NSNumber alloc] initWithInt:1] );
+            result( [[NSNumber alloc] initWithInt:2] );
         }else{
             result( [[NSNumber alloc] initWithInt:0] );
         }
@@ -130,6 +131,19 @@ static bool launchedByLocationManager = false;
         [self getSharedLocationManager];
         [self.clLocationManager stopMonitoringSignificantLocationChanges];
         result( [[NSNumber alloc] initWithInt:1] );
+    }else if ([call.method isEqualToString:@"getLastSignificantLocation"]) {
+        [self getSharedLocationManager];
+        if( self.clLocationManager.location != nil ) {
+            NSDictionary<NSString*,NSNumber*>* coordinatesDict = @{
+               @"latitude": @(self.clLocationManager.location.coordinate.latitude),
+               @"longitude": @(self.clLocationManager.location.coordinate.longitude),
+               @"accuracy": @(self.clLocationManager.location.horizontalAccuracy),
+               @"altitude": @(self.clLocationManager.location.altitude),
+            };
+            result( coordinatesDict );
+        }else{
+            result( nil );
+        }
     }else if ([call.method isEqualToString:@"start"]) {
         [self getSharedLocationManager];
         [self startWithArguments:call.arguments];
