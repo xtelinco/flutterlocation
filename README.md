@@ -1,3 +1,8 @@
+# IMPORTANT NOTICE
+
+
+You are free to use this code, but it is totally unsupported. Various changes were needed for another project and a lot of the changes are custom for that project. It isn't backward compatible with the main flutterlocation branch.
+
 # Flutter Location Plugin
 
 This plugin for [Flutter](https://flutter.io)
