@@ -4,6 +4,7 @@
 
 @interface LocationPlugin() <FlutterStreamHandler, CLLocationManagerDelegate>
 @property (strong, nonatomic) CLLocationManager *clLocationManager;
+@property (strong, nonatomic) CLLocation *lastLocation;
 @property (copy, nonatomic)   FlutterResult      flutterResult;
 @property (copy, nonatomic)   FlutterEventSink   flutterEventSink;
 @property (assign, nonatomic) BOOL               flutterListening;
@@ -31,6 +32,10 @@ static bool launchedByLocationManager = false;
 -(BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     if([launchOptions objectForKey:UIApplicationLaunchOptionsLocationKey] != nil) {
         launchedByLocationManager = true;
+        CLLocationManager *manager = [self getSharedLocationManager];
+        if(manager != nil && manager.location != nil) {
+            self.lastLocation = manager.location;
+        }
     } else{
         launchedByLocationManager = false;
     }
@@ -49,6 +54,7 @@ static bool launchedByLocationManager = false;
         self.autoAuthorize = YES;
         self.locationUpdating = NO;
         self.locationAccuracy = 1;
+        self.lastLocation = nil;
     }
     return self;
 }
@@ -57,13 +63,14 @@ static bool launchedByLocationManager = false;
     if(self.clLocationManager == nil) {
         self.clLocationManager = [[CLLocationManager alloc] init];
         self.clLocationManager.delegate = self;
+        self.clLocationManager.desiredAccuracy = kCLLocationAccuracyThreeKilometers;
+        //self.clLocationManager.showsBackgroundLocationIndicator = YES;
     }
     return self.clLocationManager;
 }
 
 -(void)handleMethodCall:(FlutterMethodCall*)call result:(FlutterResult)result {
     if ([call.method isEqualToString:@"getLocation"]) {
-        self.flutterResult = result;
         if ([CLLocationManager locationServicesEnabled]) {
             [self getSharedLocationManager];
             
@@ -79,9 +86,19 @@ static bool launchedByLocationManager = false;
                 }
             }
 
-            if( self.locationUpdating == NO) {
-                self.clLocationManager.desiredAccuracy = kCLLocationAccuracyBest;
+            if( self.lastLocation != nil ) {
+                NSDictionary<NSString*,NSNumber*>* coordinatesDict = @{
+                   @"latitude": @(self.lastLocation.coordinate.latitude),
+                   @"longitude": @(self.lastLocation.coordinate.longitude),
+                   @"accuracy": @(self.lastLocation.horizontalAccuracy),
+                   @"altitude": @(self.lastLocation.altitude),
+                };
+                result( coordinatesDict );
+            }else{
+                self.flutterResult = result;
             }
+
+            NSLog(@"Sending request");
             [self.clLocationManager requestLocation];
         }
     }else if ([call.method isEqualToString:@"getAuthorizationStatus"]) {
@@ -239,7 +256,8 @@ static bool launchedByLocationManager = false;
                                                           @"accuracy": @(location.horizontalAccuracy),
                                                           @"altitude": @(location.altitude),
                                                           };
-    //NSLog(@"ios land %@", coordinatesDict);
+    NSLog(@"ios land %@", coordinatesDict);
+    self.lastLocation = location;
     if(self.flutterResult != nil) {
         self.flutterResult(coordinatesDict);
         self.flutterResult = nil;
