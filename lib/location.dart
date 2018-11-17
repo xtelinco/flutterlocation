@@ -34,9 +34,6 @@ class Location {
     return _channel.invokeMethod('startMonitoringSignificant');
   }
 
-  Future<Map<String,double>> getLastSignificantLocation() =>
-      _channel.invokeMethod('getLastSignificantLocation');
-
   Future<int> stop() {
     return _channel.invokeMethod('stop');
   }

@@ -2,9 +2,6 @@ package com.lyokone.location;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.PendingIntent;
-import android.app.Service;
-import android.content.Intent;
 import android.content.Context;
 import android.content.BroadcastReceiver;
 import android.content.IntentSender;
@@ -14,7 +11,6 @@ import android.location.Location;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Looper;
-
 import android.support.annotation.MainThread;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
@@ -51,9 +47,6 @@ import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.PluginRegistry.Registrar;
 import io.flutter.plugin.common.PluginRegistry.RequestPermissionsResultListener;
 
-import com.lyokone.location.LocationPluginReceiver;
-
-
 /**
  * LocationPlugin
  */
@@ -65,35 +58,22 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, Request
     private static final int REQUEST_CHECK_SETTINGS = 0x1;
     private static final long UPDATE_INTERVAL_IN_MILLISECONDS = 10000;
 
-    static public LocationPlugin instance;
-
     private FusedLocationProviderClient mFusedLocationClient;
     private SettingsClient mSettingsClient;
     private LocationCallback mLocationCallback;
 
     private EventSink events;
-    private Activity activity;
+    private final Activity activity;
     private boolean autoGetPermissions;
     private Result permissionsResult;
 
-    private PendingIntent pendingIntent;
-    private Location significantLocation;
-    private boolean significantWakeup;
-
-
-    public void setActivity(Activity activity) {
-        if( activity != null && this.activity == null) {
-            this.activity = activity;
-            mFusedLocationClient = LocationServices.getFusedLocationProviderClient(activity);
-            mSettingsClient = LocationServices.getSettingsClient(activity);
-        }
-    }
 
     LocationPlugin(Activity activity) {
-        setActivity(activity);
+        this.activity = activity;
+        mFusedLocationClient = LocationServices.getFusedLocationProviderClient(activity);
+        mSettingsClient = LocationServices.getSettingsClient(activity);
         createLocationCallback();
         this.autoGetPermissions = true;
-        significantWakeup = false;
     }
 
     /**
@@ -132,9 +112,7 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, Request
      * Plugin registration.
      */
     public static void registerWith(Registrar registrar) {
-        if(instance == null) {
-            instance = new LocationPlugin(registrar.activity());
-        }
+        final LocationPlugin instance = new LocationPlugin(registrar.activity());
         final MethodChannel channel = new MethodChannel(registrar.messenger(), METHOD_CHANNEL_NAME);
         channel.setMethodCallHandler( instance );
 
@@ -143,7 +121,6 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, Request
 
         registrar.addRequestPermissionsResultListener( instance );
     }
-
 
     private void getLastLocation(final Result result) {
         mFusedLocationClient.getLastLocation().addOnSuccessListener(new OnSuccessListener<Location>() {
@@ -203,28 +180,16 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, Request
                 requestPermissions();
             }
         } else if (call.method.equals("wasStartedByLocationManager")) {
-            result.success( significantWakeup ? (this.activity == null ? 2 : 1) : 0);
-            significantWakeup = false;
-        } else if (call.method.equals("getLastSignificantLocation")) {
-            if( significantLocation != null ) {
-                HashMap<String, Double> loc = new HashMap<String, Double>();
-                loc.put("latitude", significantLocation.getLatitude());
-                loc.put("longitude", significantLocation.getLongitude());
-                loc.put("accuracy", (double) significantLocation.getAccuracy());
-                loc.put("altitude", significantLocation.getAltitude());
-                result.success( loc );
-            }else{
-                result.error("ERROR", "Failed to get location.", null);
-            }
+            result.success(0);
         } else if (call.method.equals("start")) {
             startListening(call.arguments, result);
+            result.success(1);
         } else if (call.method.equals("stop")) {
             stopListening();
             result.success(1);
         } else if (call.method.equals("startMonitoringSignificant")) {
-            startMonitoringSignificant(call.arguments, result);
+            result.success(1);
         } else if (call.method.equals("stopMonitoringSignificant")) {
-            stopMonitoringSignificant();
             result.success(1);
         } else {
             result.notImplemented();
@@ -339,120 +304,6 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, Request
         mFusedLocationClient.removeLocationUpdates(mLocationCallback);
     }
 
-    public void startMonitoringSignificant(Object arguments, final Result result) {
-        int accuracy = LocationRequest.PRIORITY_HIGH_ACCURACY;
-        long interval = UPDATE_INTERVAL_IN_MILLISECONDS;
-        boolean start = true;
-
-        if( arguments != null && arguments instanceof Map ) {
-            final Map<?, ?> args = (Map<?, ?>) arguments;
-            final Number ac = (Number) args.get("accuracy");
-            if (ac != null) {
-                accuracy = ac.intValue();
-                if (accuracy < LocationRequest.PRIORITY_HIGH_ACCURACY) {
-                    accuracy = LocationRequest.PRIORITY_HIGH_ACCURACY;
-                }
-                if (accuracy > LocationRequest.PRIORITY_NO_POWER) {
-                    accuracy = LocationRequest.PRIORITY_NO_POWER;
-                }
-            }
-            final Number iv = (Number) args.get("interval");
-            if (iv != null) {
-                interval = iv.intValue();
-                if (interval < 100) {
-                    accuracy = 100;
-                }
-            }
-            final Number st = (Number) args.get("start");
-            if (st != null && st.intValue() == 0) {
-                start = false;
-            }
-        }
-
-        if( !start ) {
-            if( result != null ) {
-                result.success( 1 );
-            }
-            return;
-        }
-
-        if (!checkPermissions()) {
-            if( autoGetPermissions ) {
-                requestPermissions();
-            }
-            return;
-        }
-
-
-        final LocationRequest locationRequest = new LocationRequest();
-
-
-        // Sets the desired interval for active location updates. This interval is
-        // inexact. You may not receive updates at all if no location sources are available, or
-        // you may receive them slower than requested. You may also receive updates faster than
-        // requested if other applications are requesting location at a faster interval.
-        locationRequest.setInterval( interval );
-
-        // Sets the fastest rate for active location updates. This interval is exact, and your
-        // application will never receive updates faster than this value.
-        locationRequest.setFastestInterval( interval / 2 );
-
-        locationRequest.setPriority( accuracy );
-
-        LocationSettingsRequest.Builder builder = new LocationSettingsRequest.Builder();
-        builder.addLocationRequest(locationRequest);
-
-        /**
-         * Requests location updates from the FusedLocationApi. Note: we don't call this unless location
-         * runtime permission has been granted.
-         */
-        mSettingsClient.checkLocationSettings( builder.build() )
-                .addOnSuccessListener(activity, new OnSuccessListener<LocationSettingsResponse>() {
-                    @Override
-                    public void onSuccess(LocationSettingsResponse locationSettingsResponse) {
-                        Intent intent = new Intent( activity, LocationPluginReceiver.class );
-                        pendingIntent = PendingIntent.getBroadcast( activity, 14872, intent, PendingIntent.FLAG_CANCEL_CURRENT);
-
-                        Log.i(METHOD_CHANNEL_NAME, "Requesting background updates");
-                        mFusedLocationClient.requestLocationUpdates(locationRequest, pendingIntent);
-                        if( result != null ) {
-                            result.success( 1 );
-                        }
-                    }
-                }).addOnFailureListener(activity, new OnFailureListener() {
-            @Override
-            public void onFailure(@NonNull Exception e) {
-                if( result != null ) {
-                    result.success( 0 );
-                }
-                int statusCode = ((ApiException) e).getStatusCode();
-                switch (statusCode) {
-                    case LocationSettingsStatusCodes.RESOLUTION_REQUIRED:
-                        try {
-                            // Show the dialog by calling startResolutionForResult(), and check the
-                            // result in onActivityResult().
-                            ResolvableApiException rae = (ResolvableApiException) e;
-                            rae.startResolutionForResult(activity, REQUEST_CHECK_SETTINGS);
-                        } catch (IntentSender.SendIntentException sie) {
-                            Log.i(METHOD_CHANNEL_NAME, "PendingIntent unable to execute request.");
-                        }
-                        break;
-                    case LocationSettingsStatusCodes.SETTINGS_CHANGE_UNAVAILABLE:
-                        String errorMessage = "Location settings are inadequate, and cannot be "
-                                + "fixed here. Fix in Settings.";
-                        Log.e(METHOD_CHANNEL_NAME, errorMessage);
-                }
-            }
-        });
-    }
-
-    public void stopMonitoringSignificant() {
-        if( pendingIntent != null ) {
-            mFusedLocationClient.removeLocationUpdates(pendingIntent);
-        }
-    }
-
-
     @Override
     public void onListen(Object arguments, final EventSink eventsSink) {
         events = eventsSink;
@@ -475,21 +326,5 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, Request
         }
 
         return true;
-    }
-
-    public void setSignificationNewLocation( Location l ) {
-        significantLocation = l;
-        significantWakeup = true;
-    }
-
-    public void updateLocation( Location location ) {
-        if( events != null ) {
-            HashMap<String, Double> loc = new HashMap<String, Double>();
-            loc.put("latitude", location.getLatitude());
-            loc.put("longitude", location.getLongitude());
-            loc.put("accuracy", (double) location.getAccuracy());
-            loc.put("altitude", location.getAltitude());
-            events.success(loc);
-        }
     }
 }
