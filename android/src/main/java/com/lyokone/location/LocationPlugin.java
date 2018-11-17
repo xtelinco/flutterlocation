@@ -110,6 +110,7 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, Request
                 loc.put("longitude", location.getLongitude());
                 loc.put("accuracy", (double) location.getAccuracy());
                 loc.put("altitude", location.getAltitude());
+                loc.put("ts", (double)location.getTime()/1000.0);
                 events.success(loc);
             }
         };
@@ -155,6 +156,7 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, Request
                     loc.put("longitude", location.getLongitude());
                     loc.put("accuracy", (double) location.getAccuracy());
                     loc.put("altitude", location.getAltitude());
+                    loc.put("ts", (double)location.getTime()/1000.0);
                     if (result != null) {
                         result.success(loc);
                         return;
@@ -212,6 +214,7 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, Request
                 loc.put("longitude", significantLocation.getLongitude());
                 loc.put("accuracy", (double) significantLocation.getAccuracy());
                 loc.put("altitude", significantLocation.getAltitude());
+                loc.put("ts", (double)significantLocation.getTime()/1000.0);
                 result.success( loc );
             }else{
                 result.error("ERROR", "Failed to get location.", null);
@@ -489,6 +492,7 @@ public class LocationPlugin implements MethodCallHandler, StreamHandler, Request
             loc.put("longitude", location.getLongitude());
             loc.put("accuracy", (double) location.getAccuracy());
             loc.put("altitude", location.getAltitude());
+            loc.put("ts", (double)location.getTime()/1000.0);
             events.success(loc);
         }
     }
