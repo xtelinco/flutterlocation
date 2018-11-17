@@ -12,38 +12,33 @@ class Location {
   Stream<Map<String,double>> _onLocationChanged;
 
   Future<Map<String,double>> get getLocation =>
-      _channel.invokeMethod('getLocation').then((result) => result.cast<String,double>());
+      _channel.invokeMethod('getLocation');
 
   Future<String> get getAuthorizationStatus =>
-      _channel.invokeMethod('getAuthorizationStatus').then((result) { return result as String; });
+      _channel.invokeMethod('getAuthorizationStatus');
 
   Future<String> authorize(String type) {
     return _channel.invokeMethod('authorize', {
       'type': type
-    } ).then((result) { return result as String; });
+    } );
   }
 
   Future<int> wasStartedByLocationManager() {
-    return _channel.invokeMethod('wasStartedByLocationManager')
-        .then((result) { return result as int; });
+    return _channel.invokeMethod('wasStartedByLocationManager');
   }
 
   Future<int> stopMonitoringSignificant() {
-    return _channel.invokeMethod('stopMonitoringSignificant')
-        .then((result) { return result as int; });
+    return _channel.invokeMethod('stopMonitoringSignificant');
   }
   Future<int> startMonitoringSignificant() {
-    return _channel.invokeMethod('startMonitoringSignificant')
-        .then((result) { return result as int; });
+    return _channel.invokeMethod('startMonitoringSignificant');
   }
 
   Future<Map<String,double>> getLastSignificantLocation() =>
-      _channel.invokeMethod('getLastSignificantLocation')
-          .then((result) => result.cast<String,double>());
+      _channel.invokeMethod('getLastSignificantLocation');
 
   Future<int> stop() {
-    return _channel.invokeMethod('stop')
-        .then((result) { return result as int; });
+    return _channel.invokeMethod('stop');
   }
 
   Future<int> start({int accuracy=1, int interval=10000}) {
@@ -53,7 +48,7 @@ class Location {
       'interval': interval,
       'accuracy': accuracy,
       'start': 1
-    }).then((result) { return result as int; });
+    });
   }
 
 
@@ -64,26 +59,24 @@ class Location {
             'interval': 10000,
             'accuracy': 1,
             'start': 1
-          }).map<Map<String, double>>(
-                  (element) => element.cast<String, double>());
+          });
       _streamAccuracy = 1;
       _streamInterval = 10000;
     }
     return _onLocationChanged;
   }
 
-  Future<Stream<Map<String, double>>> getLocationChangedListener({int accuracy=1, int interval=10000, bool startup=true}) async {
+  Future<Stream<Map<String, double>>> getLocationChangedListener({int accuracy=1, int interval=10000, bool start=true}) async {
     if (_onLocationChanged == null ) {
       _onLocationChanged =
           _stream.receiveBroadcastStream(<String,int>{
             'interval': interval,
             'accuracy': accuracy,
-            'start': startup ? 1 : 0
-          }).map<Map<String, double>>(
-                  (element) => element.cast<String, double>());
+            'start': start ? 1 : 0
+          });
       _streamAccuracy = accuracy;
       _streamInterval = interval;
-    }else if (startup && (accuracy != _streamAccuracy || interval != _streamInterval)) {
+    }else if (accuracy != _streamAccuracy || interval != _streamInterval) {
       start(accuracy: accuracy, interval: interval);
     }
     return _onLocationChanged;
