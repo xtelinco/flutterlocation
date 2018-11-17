@@ -12,6 +12,7 @@
 @property (assign, nonatomic) BOOL               locationUpdating;
 @property (assign, nonatomic) int                locationAccuracy;
 @property (copy, nonatomic)   FlutterResult      authorizeResult;
+@property (strong, nonatomic) FlutterHeadlessDartRunner *backgroundRunner;
 @end
 
 static bool launchedByLocationManager = false;
@@ -91,8 +92,7 @@ static bool launchedByLocationManager = false;
                    @"longitude": @(self.lastLocation.coordinate.longitude),
                    @"accuracy": @(self.lastLocation.horizontalAccuracy),
                    @"altitude": @(self.lastLocation.altitude),
-                   @"ts": @(self.lastLocation.timestamp.timeIntervalSince1970),
-                 };
+                };
                 result( coordinatesDict );
             }else{
                 self.flutterResult = result;
@@ -123,30 +123,13 @@ static bool launchedByLocationManager = false;
         self.autoAuthorize = NO;
 
         if( [CLLocationManager locationServicesEnabled] ) {
+            self.authorizeResult = result;
             [self getSharedLocationManager];
-            CLAuthorizationStatus status = [CLLocationManager authorizationStatus];
             NSLog(@"args: %@", call.arguments);
-            if( status == kCLAuthorizationStatusNotDetermined ) {
-              self.authorizeResult = result;
-              if([ call.arguments[@"type"] isEqualToString:@"Always"]) {
-                 [self.clLocationManager requestAlwaysAuthorization];
-              }else{
-                 [self.clLocationManager requestWhenInUseAuthorization];
-              }
+            if([ call.arguments[@"type"] isEqualToString:@"Always"]) {
+                [self.clLocationManager requestAlwaysAuthorization];
             }else{
-              if([ call.arguments[@"type"] isEqualToString:@"Always"]) {
-                if( status == kCLAuthorizationStatusAuthorizedAlways ) {
-                  result(@"Always");
-                }else{
-                  result(@"Denied");
-                } 
-              } else {
-                if( status == kCLAuthorizationStatusAuthorizedAlways || status == kCLAuthorizationStatusAuthorizedWhenInUse ) {
-                  result(@"InsUse");
-                }else{
-                  result(@"Denied");
-                } 
-              }
+                [self.clLocationManager requestWhenInUseAuthorization];
             }
         }else{
             result(@"Off");
@@ -173,7 +156,6 @@ static bool launchedByLocationManager = false;
                @"longitude": @(self.clLocationManager.location.coordinate.longitude),
                @"accuracy": @(self.clLocationManager.location.horizontalAccuracy),
                @"altitude": @(self.clLocationManager.location.altitude),
-               @"ts": @(self.clLocationManager.location.timestamp.timeIntervalSince1970),
             };
             result( coordinatesDict );
         }else{
@@ -273,7 +255,6 @@ static bool launchedByLocationManager = false;
                                                           @"longitude": @(location.coordinate.longitude),
                                                           @"accuracy": @(location.horizontalAccuracy),
                                                           @"altitude": @(location.altitude),
-                                                          @"ts": @(location.timestamp.timeIntervalSince1970),
                                                           };
     NSLog(@"ios land %@", coordinatesDict);
     self.lastLocation = location;

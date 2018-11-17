@@ -20,9 +20,7 @@ class Location {
   Future<String> authorize(String type) {
     return _channel.invokeMethod('authorize', {
       'type': type
-    } ).then((result) {
-      return result as String;
-    });
+    } ).then((result) { return result as String; });
   }
 
   Future<int> wasStartedByLocationManager() {
