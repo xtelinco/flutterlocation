@@ -1,4 +1,5 @@
 #import "LocationPlugin.h"
+#import "BackgroundHandler.h"
 
 @import CoreLocation;
 
@@ -9,10 +10,13 @@
 
 @property (copy, nonatomic)   FlutterEventSink   flutterEventSink;
 @property (assign, nonatomic) BOOL               flutterListening;
+@property (assign, nonatomic) BOOL               backgroundListening;
 @property (assign, nonatomic) BOOL               hasInit;
 @end
 
-@implementation LocationPlugin
+@implementation LocationPlugin {
+    NSUserDefaults *_persistentState;
+}
 
 +(void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
     FlutterMethodChannel *channel = [FlutterMethodChannel methodChannelWithName:@"lyokone/location" binaryMessenger:registrar.messenger];
@@ -21,7 +25,35 @@
     LocationPlugin *instance = [[LocationPlugin alloc] init];
     [registrar addMethodCallDelegate:instance channel:channel];
     [stream setStreamHandler:instance];
+    
+    [BackgroundHandler register:registrar];
 }
+
+- (BOOL)application:(UIApplication *)application
+    didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+
+
+  // Check to see if we're being launched due to a location event.
+  if (launchOptions[UIApplicationLaunchOptionsLocationKey] != nil) {
+        self.hasInit = YES;
+    self.clLocationManager = [[CLLocationManager alloc] init];
+
+    self.clLocationManager.pausesLocationUpdatesAutomatically =
+        [self getPausesLocationUpdatesAutomatically];
+    if (@available(iOS 11.0, *)) {
+      self.clLocationManager.showsBackgroundLocationIndicator =
+          [self getShowsBackgroundLocationIndicator];
+    }
+    self.clLocationManager.allowsBackgroundLocationUpdates = YES;
+    // Finally, restart monitoring for location changes to get our location.
+    [self.clLocationManager startMonitoringSignificantLocationChanges];
+    [BackgroundHandler sharedInstance].wasStartByLocationManager = YES;
+  }
+
+  // Note: if we return NO, this vetos the launch of the application.
+  return YES;
+}
+
 
 -(instancetype)init {
     self = [super init];
@@ -30,6 +62,7 @@
         self.locationWanted = NO;
         self.flutterListening = NO;
         self.hasInit = NO;
+        _persistentState = [NSUserDefaults standardUserDefaults];
   
     }
     return self;
@@ -59,6 +92,7 @@
 
 -(void)handleMethodCall:(FlutterMethodCall*)call result:(FlutterResult)result {
     [self initLocation];
+    NSArray *arguments = call.arguments;
     if ([call.method isEqualToString:@"getLocation"]) {
         if ([CLLocationManager authorizationStatus] == kCLAuthorizationStatusDenied && [CLLocationManager locationServicesEnabled])
         {
@@ -72,6 +106,10 @@
         self.flutterResult = result;
         self.locationWanted = YES;
         [self.clLocationManager startUpdatingLocation];
+    } else if ([call.method isEqualToString:@"start"]) {
+        [self.clLocationManager startUpdatingLocation];
+    } else if ([call.method isEqualToString:@"stop"]) {
+        [self.clLocationManager stopUpdatingLocation];
     } else if ([call.method isEqualToString:@"hasPermission"]) {
         NSLog(@"Do has permissions");
         if ([CLLocationManager locationServicesEnabled]) {
@@ -90,7 +128,16 @@
             // Location is not yet available
             result(@(0));
         }
-//
+    } else if ([@"monitorLocationChanges" isEqualToString:call.method]) {
+        NSAssert(arguments.count == 3, @"Invalid argument count for 'monitorLocationChanges'");
+        [self monitorLocationChanges:call.arguments];
+        result(@(YES));
+    } else if ([@"cancelLocationUpdates" isEqualToString:call.method]) {
+        NSAssert(arguments.count == 0, @"Invalid argument count for 'cancelLocationUpdates'");
+        [self stopUpdatingLocation];
+        result(nil);
+    } else if ([@"wasStartedByLocationManager" isEqualToString:call.method]) {
+            result( @( [BackgroundHandler sharedInstance].wasStartByLocationManager ? 1 : 0 ) );
     } else {
         result(FlutterMethodNotImplemented);
     }
@@ -115,6 +162,7 @@
                                                           @"longitude": @(location.coordinate.longitude),
                                                           @"accuracy": @(location.horizontalAccuracy),
                                                           @"altitude": @(location.altitude),
+                                                          @"timestamp": @(location.timestamp.timeIntervalSince1970),
                                                           @"speed": @(location.speed),
                                                           @"speed_accuracy": @(0.0),
                                                           };
@@ -128,6 +176,46 @@
     } else {
         [self.clLocationManager stopUpdatingLocation];
     }
+    
+    [[BackgroundHandler sharedInstance] notify:coordinatesDict];
 }
+
+// Start receiving location updates.
+- (void)monitorLocationChanges:(NSArray *)arguments {
+  self.clLocationManager.pausesLocationUpdatesAutomatically = arguments[0];
+  if (@available(iOS 11.0, *)) {
+    self.clLocationManager.showsBackgroundLocationIndicator = arguments[1];
+  }
+  self.clLocationManager.activityType = [arguments[2] integerValue];
+  self.clLocationManager.allowsBackgroundLocationUpdates = YES;
+
+  [self setPausesLocationUpdatesAutomatically:self.clLocationManager.pausesLocationUpdatesAutomatically];
+  if (@available(iOS 11.0, *)) {
+        [self setShowsBackgroundLocationIndicator:self.clLocationManager.showsBackgroundLocationIndicator];
+  }
+  [self.clLocationManager startMonitoringSignificantLocationChanges];
+}
+
+// Stop the location updates.
+- (void)stopUpdatingLocation {
+  [self.clLocationManager stopUpdatingLocation];
+}
+
+- (BOOL)getPausesLocationUpdatesAutomatically {
+    return [_persistentState boolForKey:@"pauses_location_updates_automatically"];
+}
+
+- (void)setPausesLocationUpdatesAutomatically:(BOOL)pause {
+    [_persistentState setBool:pause forKey:@"pauses_location_updates_automatically"];
+}
+
+- (BOOL)getShowsBackgroundLocationIndicator {
+    return [_persistentState boolForKey:@"shows_background_location_indicator"];
+}
+
+- (void)setShowsBackgroundLocationIndicator:(BOOL)pause {
+    [_persistentState setBool:pause forKey:@"shows_background_location_indicator"];
+}
+
 
 @end
