@@ -1,4 +1,8 @@
 #import <Flutter/Flutter.h>
 
-@interface LocationPlugin : NSObject<FlutterPlugin>
+#import <CoreLocation/CoreLocation.h>
+
+@interface LocationPlugin : NSObject<FlutterPlugin, CLLocationManagerDelegate>
+-(void)updateLocation:(CLLocation*)location;
+
 @end

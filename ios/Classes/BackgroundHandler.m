@@ -33,22 +33,28 @@
     return self;
 }
 
--(void)notify:(NSDictionary<NSString*,NSNumber*>*)location {
+-(BOOL)notify:(NSDictionary<NSString*,NSNumber*>*)location {
+    BOOL ret = NO;
+    NSLog(@"BACKGROUND loc");
     if(_eventSink != nil) {
         _eventSink(location);
+        ret = YES;
     }
     _lastLocation = location;
+    return ret;
 }
 
-// @override by derived StreamHandler
 -(NSString*) event {
-    return @"background_location";
+    return @"backgroundlocation";
 }
 
 // @override by derived StreamHandler
 - (FlutterError*)onListenWithArguments:(id)arguments eventSink:(FlutterEventSink)events {
     _eventSink = events;
-    if( _lastLocation ) {
+    NSLog(@"Listen backgroundlocation ");
+    NSLog(@"Listen backgroundlocation %@", _lastLocation);
+    if( _lastLocation != nil ) {
+        NSLog(@"SEND %@", _lastLocation[@"latitude"]);
         events(_lastLocation);
     }
     return nil;

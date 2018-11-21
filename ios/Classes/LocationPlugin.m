@@ -3,7 +3,7 @@
 
 @import CoreLocation;
 
-@interface LocationPlugin() <FlutterStreamHandler, CLLocationManagerDelegate>
+@interface LocationPlugin() <FlutterPlugin, FlutterStreamHandler, CLLocationManagerDelegate>
 @property (strong, nonatomic) CLLocationManager *clLocationManager;
 @property (copy, nonatomic)   FlutterResult      flutterResult;
 @property (assign, nonatomic) BOOL               locationWanted;
@@ -26,28 +26,42 @@
     [registrar addMethodCallDelegate:instance channel:channel];
     [stream setStreamHandler:instance];
     
+    [registrar addApplicationDelegate:instance];
+    
     [BackgroundHandler register:registrar];
 }
 
 - (BOOL)application:(UIApplication *)application
     didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
-
+    NSLog(@"LAUNCH");
 
   // Check to see if we're being launched due to a location event.
   if (launchOptions[UIApplicationLaunchOptionsLocationKey] != nil) {
+        NSLog(@"LAUNCH with options");
         self.hasInit = YES;
-    self.clLocationManager = [[CLLocationManager alloc] init];
+        self.clLocationManager = [[CLLocationManager alloc] init];
+        self.clLocationManager.delegate = self;
 
-    self.clLocationManager.pausesLocationUpdatesAutomatically =
-        [self getPausesLocationUpdatesAutomatically];
-    if (@available(iOS 11.0, *)) {
-      self.clLocationManager.showsBackgroundLocationIndicator =
-          [self getShowsBackgroundLocationIndicator];
-    }
-    self.clLocationManager.allowsBackgroundLocationUpdates = YES;
-    // Finally, restart monitoring for location changes to get our location.
-    [self.clLocationManager startMonitoringSignificantLocationChanges];
-    [BackgroundHandler sharedInstance].wasStartByLocationManager = YES;
+        self.clLocationManager.pausesLocationUpdatesAutomatically =
+          [self getPausesLocationUpdatesAutomatically];
+        if (@available(iOS 11.0, *)) {
+          self.clLocationManager.showsBackgroundLocationIndicator =
+              [self getShowsBackgroundLocationIndicator];
+        }
+        if (@available(iOS 9.0, *)) {
+              self.clLocationManager.allowsBackgroundLocationUpdates = YES;
+        }
+
+        self.backgroundListening = YES;
+        if(self.clLocationManager.location != nil) {
+            [self updateLocation:self.clLocationManager.location];
+        }
+        // Finally, restart monitoring for location changes to get our location.
+        [self.clLocationManager startMonitoringSignificantLocationChanges];
+
+        [BackgroundHandler sharedInstance].wasStartByLocationManager = YES;
+        FlutterViewController *root = (FlutterViewController *)[[[[UIApplication sharedApplication] delegate] window] rootViewController];
+        [root viewWillAppear:NO];
   }
 
   // Note: if we return NO, this vetos the launch of the application.
@@ -62,6 +76,7 @@
         self.locationWanted = NO;
         self.flutterListening = NO;
         self.hasInit = NO;
+        self.backgroundListening = NO;
         _persistentState = [NSUserDefaults standardUserDefaults];
   
     }
@@ -156,7 +171,10 @@
 }
 
 -(void)locationManager:(CLLocationManager*)manager didUpdateLocations:(NSArray<CLLocation*>*)locations {
-    CLLocation *location = locations.firstObject;
+    [self updateLocation: locations.firstObject];
+}
+
+-(void)updateLocation:(CLLocation*)location {
     NSDictionary<NSString*,NSNumber*>* coordinatesDict = @{
                                                           @"latitude": @(location.coordinate.latitude),
                                                           @"longitude": @(location.coordinate.longitude),
@@ -173,11 +191,15 @@
     }
     if (self.flutterListening) {
         self.flutterEventSink(coordinatesDict);
+        [[BackgroundHandler sharedInstance] notify:coordinatesDict];
     } else {
-        [self.clLocationManager stopUpdatingLocation];
+        if( ! [[BackgroundHandler sharedInstance] notify:coordinatesDict] ) {
+            if(!self.backgroundListening) {
+                NSLog(@"Background stop listening");
+                [self.clLocationManager stopUpdatingLocation];
+            }
+        }
     }
-    
-    [[BackgroundHandler sharedInstance] notify:coordinatesDict];
 }
 
 // Start receiving location updates.
@@ -187,17 +209,22 @@
     self.clLocationManager.showsBackgroundLocationIndicator = arguments[1];
   }
   self.clLocationManager.activityType = [arguments[2] integerValue];
-  self.clLocationManager.allowsBackgroundLocationUpdates = YES;
+  self.clLocationManager.activityType = CLActivityTypeOther;
+  if (@available(iOS 9.0, *)) {
+        self.clLocationManager.allowsBackgroundLocationUpdates = YES;
+  }
 
   [self setPausesLocationUpdatesAutomatically:self.clLocationManager.pausesLocationUpdatesAutomatically];
   if (@available(iOS 11.0, *)) {
         [self setShowsBackgroundLocationIndicator:self.clLocationManager.showsBackgroundLocationIndicator];
   }
+  self.backgroundListening = YES;
   [self.clLocationManager startMonitoringSignificantLocationChanges];
 }
 
 // Stop the location updates.
 - (void)stopUpdatingLocation {
+  self.backgroundListening = NO;
   [self.clLocationManager stopUpdatingLocation];
 }
 

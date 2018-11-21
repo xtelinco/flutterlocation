@@ -3,6 +3,12 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart';
 
+import 'dart:ui';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+
 enum LocationActivityType {
   other,
   automotiveNavigation,
@@ -64,9 +70,9 @@ class Location {
   Stream<Map<String,double>> _onLocationChanged;
   static Stream<dynamic> _eventsFetch;
 
-  bool pauseLocationUpdatesAutomatically;
-  bool showsBackgroundLocationIndicator;
-  LocationActivityType activityType;
+  bool pauseLocationUpdatesAutomatically = false;
+  bool showsBackgroundLocationIndicator = true;
+  LocationActivityType activityType = LocationActivityType.other;
 
   Future<Map<String, double>> getLocation() => _channel
       .invokeMethod('getLocation')
@@ -97,6 +103,8 @@ class Location {
   }
 
   static Future<bool> registerHeadlessTask(Function(LocationPoint location) callback) {
+    WidgetsFlutterBinding.ensureInitialized();
+
     if (_backgroundEvents != null) {
       _eventsFetch = _backgroundEvents.receiveBroadcastStream();
 
@@ -108,11 +116,21 @@ class Location {
     return Future.value(true);
   }
 
-  Future<bool> monitorSignificantLocationChanges() {
+  Future<bool> monitorSignificantLocationChanges({bool pauseAutomatically, bool showBackgroundIndicator, LocationActivityType type}) {
+    if(pauseAutomatically != null) {
+      pauseLocationUpdatesAutomatically = pauseAutomatically;
+    }
+    if(showBackgroundIndicator != null) {
+      showsBackgroundLocationIndicator = showBackgroundIndicator;
+    }
+    if(type != null) {
+      activityType = type;
+    }
+
     return _channel.invokeMethod(_kMonitorLocationChanges, <dynamic>[
       pauseLocationUpdatesAutomatically,
       showsBackgroundLocationIndicator,
-      0
+      activityType.index
     ]).then<bool>((dynamic result) => result);
   }
 
